@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html dir="ltr" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
+<title>Verify a certificate | X2D Academy</title>
+<meta content="noindex" name="robots"/>
+<meta content="#080C0E" name="theme-color"/>
+<link href="favicon.svg" rel="icon" type="image/svg+xml"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700;900&amp;family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<script src="assets/js/boot.js"></script>
+<link href="assets/css/styles.css" rel="stylesheet"/>
+</head>
+<body class="mini verify" data-title-ar="التحقق من شهادة | أكاديمية X2D" data-title-en="Verify a certificate | X2D Academy">
+<header class="mini-bar">
+<a aria-label="X2D — Home" class="logo" href="./">X2D</a>
+<button class="lang-btn" id="langBtn" lang="ar" type="button">العربية</button>
+</header>
+<main class="mini-main">
+<div class="wrap">
+<h1><span class="l-en">Verify a certificate</span><span class="l-ar">اتحقّق من شهادة</span></h1>
+<p class="lead"><span class="l-en">Enter the certificate ID, or scan the QR code printed on the certificate.</span><span class="l-ar">اكتب رقم الشهادة، أو امسح الـ <span class="en">QR code</span> المطبوع عليها.</span></p>
+<form action="verify.html" class="v-form" id="vForm" method="get">
+<div class="field">
+<label for="vId"><span class="l-en">Certificate ID</span><span class="l-ar">رقم الشهادة</span></label>
+<div class="v-row">
+<input autocapitalize="characters" autocomplete="off" dir="ltr" id="vId" maxlength="40" name="id" placeholder="X2D-XXXX-XXXX-XXXX" required spellcheck="false" type="text"/>
+<button class="btn btn-red btn-lg" type="submit"><span class="l-en">Verify</span><span class="l-ar">تحقّق</span><svg aria-hidden="true" fill="none" stroke="currentColor" stroke-linecap="square" stroke-width="2.2" viewBox="0 0 24 24"><path d="M20 12H4M10 6l-6 6 6 6"></path></svg></button>
+</div>
+</div>
+</form>
+<div aria-live="polite" class="v-out" id="vOut"></div>
+</div>
+</main>
+<script src="assets/js/config.js"></script>
+<script src="assets/js/page.js"></script>
+<script src="assets/js/verify.js"></script>
+</body>
+</html>
