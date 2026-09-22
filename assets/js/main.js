@@ -138,7 +138,7 @@
   });
   /* ---------- automatic infinite tool-strip motion ---------- */
   var autoLast=performance.now();
-  var AUTO_SPEED=.32; // pixels per millisecond
+  var AUTO_SPEED=.24; // pixels per millisecond
   var originalToolCount=tools.length;
 
   /*
