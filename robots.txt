@@ -1,6 +1,8 @@
 User-agent: *
 Allow: /
 Disallow: /thanks.html
-Disallow: /verify.html
+Disallow: /verify
+Disallow: /admin
+Disallow: /api/
 
-Sitemap: https://YOUR-DOMAIN/sitemap.xml
+Sitemap: https://x-2d.vercel.app/sitemap.xml

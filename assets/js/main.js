@@ -216,7 +216,7 @@
   ds.forEach(function(d){d.addEventListener('toggle',function(){if(d.open)ds.forEach(function(o){if(o!==d)o.open=false})})});
 
 
-  /* ---------- enrollment form (Netlify Forms) ---------- */
+  /* ---------- enrollment form (posts to /api/x2d, stored for the admin dashboard) ---------- */
   updateWa();
   var form=document.getElementById('enrollForm');
   if(form){
@@ -256,10 +256,11 @@
       status.hidden=true;
       btn.disabled=true;btn.setAttribute('aria-busy','true');lab.textContent=FORM_MSG[curLang].sending;
       form.elements['language'].value=curLang;
-      fetch('/',{
+      var data={};new FormData(form).forEach(function(v,k){data[k]=v});
+      fetch('/api/x2d?r=enroll',{
         method:'POST',
-        headers:{'Content-Type':'application/x-www-form-urlencoded'},
-        body:new URLSearchParams(new FormData(form)).toString()
+        headers:{'Content-Type':'application/json','Accept':'application/json'},
+        body:JSON.stringify(data)
       }).then(function(r){
         if(!r.ok)throw new Error('HTTP '+r.status);
         form.hidden=true;done.hidden=false;done.focus();

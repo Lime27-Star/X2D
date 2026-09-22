@@ -1,6 +1,4 @@
-/* Certificate verification.
-   The public file assets/data/certs.json holds only encrypted records. Each record can be opened
-   only with the certificate's own ID (which is in the QR code), so the file can't be used to list students. */
+/* Certificate verification. Looks up one certificate by its ID through /api/x2d (rate-limited, one record per request). */
 (function () {
   var d = document.documentElement;
   var out = document.getElementById('vOut'), form = document.getElementById('vForm'), input = document.getElementById('vId');
@@ -11,6 +9,8 @@
       checking: 'Checking…',
       noneT: 'We couldn’t find this certificate.',
       noneB: 'This ID doesn’t match any certificate issued by X2D Academy. Check the ID and try again, or scan the QR code again.',
+      revokedT: 'This certificate has been revoked.',
+      revokedB: 'X2D Academy has withdrawn this certificate, so it should not be relied on. If you have questions, message us.',
       errT: 'We couldn’t check right now.',
       errB: 'Check your connection and try again.',
       verified: 'Verified',
@@ -43,6 +43,8 @@
       checking: 'جاري التحقق…',
       noneT: 'ملقيناش الشهادة دي.',
       noneB: 'الرقم ده مش مطابق لأي شهادة صادرة من أكاديمية <span class="en">X2D</span>. اتأكد من الرقم وجرّب تاني، أو امسح الـ <span class="en">QR code</span> تاني.',
+      revokedT: 'الشهادة دي اتلغت.',
+      revokedB: 'أكاديمية <span class="en">X2D</span> سحبت الشهادة دي، فمينفعش الاعتماد عليها. لو عندك أي سؤال كلمنا.',
       errT: 'مقدرناش نتحقق دلوقتي.',
       errB: 'اتأكد من النت وجرّب تاني.',
       verified: 'موثّقة',
@@ -90,31 +92,18 @@
     return n ? 'https://wa.me/' + n : '';
   }
 
-  /* ---------- crypto ---------- */
-  function b64(s) { var b = atob(s), u = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
-  function hex(u) { return Array.prototype.map.call(u, function (x) { return ('0' + x.toString(16)).slice(-2); }).join(''); }
-  async function derive(idNorm, reg) {
-    var km = await crypto.subtle.importKey('raw', new TextEncoder().encode(idNorm), 'PBKDF2', false, ['deriveBits']);
-    var bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: b64(reg.salt), iterations: reg.iter }, km, 512);
-    var u = new Uint8Array(bits);
-    return { key: u.slice(0, 32), lookup: hex(u.slice(32)) };
-  }
+  /* ---------- lookup ---------- */
+  /* Two built-in test certificates work without the database: they are clearly labelled as samples. */
+  var DEMO = { X2DSAMPLE: 'X2D-SAMPLE', X2DTESTDEMO0000: 'X2D-TEST-DEMO-0000' };
   async function lookup(idNorm) {
-    if (idNorm === 'X2DSAMPLE') {
-      return { sample: true, id: 'X2D-SAMPLE', name: 'Sample Student', date: '2026-01-15', level: 'Level 3', exam: { result: 'Passed' } };
+    if (DEMO[idNorm]) {
+      return { sample: true, id: DEMO[idNorm], name: 'Test Student', date: '2026-09-21', level: 'Level 3', status: 'valid', exam: { result: 'Passed', date: '2026-09-15' } };
     }
-    if (!(window.crypto && crypto.subtle)) throw new Error('crypto');
-    var r = await fetch('assets/data/certs.json', { cache: 'no-cache' });
-    if (!r.ok) throw new Error('registry ' + r.status);
-    var reg = await r.json();
-    var k = await derive(idNorm, reg);
-    var rec = reg.records && reg.records[k.lookup];
-    if (!rec) return null;
-    try {
-      var key = await crypto.subtle.importKey('raw', k.key, 'AES-GCM', false, ['decrypt']);
-      var plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(rec.iv) }, key, b64(rec.ct));
-      return JSON.parse(new TextDecoder().decode(plain));
-    } catch (e) { return null; }
+    var r = await fetch('/api/x2d?r=verify&id=' + encodeURIComponent(idNorm), { cache: 'no-store' });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error('api ' + r.status);
+    var j = await r.json();
+    return j && j.record ? j.record : null;
   }
 
   /* ---------- rendering ---------- */
@@ -127,6 +116,10 @@
     if (state.kind === 'loading') { out.innerHTML = '<p class="v-msg">' + s.checking + '</p>'; return; }
     if (state.kind === 'error') { out.innerHTML = '<div class="v-none"><h2>' + s.errT + '</h2><p>' + s.errB + '</p></div>'; return; }
     var wa = waHref(), waHtml = wa ? '<p class="v-foot">' + s.foot + ' <a href="' + wa + '" target="_blank" rel="noopener noreferrer">' + s.footLink + '</a></p>' : '';
+    if (state.kind === 'revoked') {
+      out.innerHTML = '<div class="v-none"><h2>' + s.revokedT + '</h2><p>' + s.revokedB + '</p><p class="mono" dir="ltr">' + esc(state.rec.id) + '</p></div>' + waHtml;
+      return;
+    }
     if (state.kind === 'none') {
       out.innerHTML = '<div class="v-none"><h2>' + s.noneT + '</h2><p>' + s.noneB + '</p></div>' + waHtml;
       return;
@@ -163,7 +156,8 @@
     state = { kind: 'loading' }; render();
     try {
       var rec = await lookup(idNorm);
-      if (rec) { rec.id = rec.id || pretty(idNorm); state = { kind: 'ok', rec: rec }; }
+      if (rec && rec.status === 'revoked') { rec.id = rec.id || pretty(idNorm); state = { kind: 'revoked', rec: rec }; }
+      else if (rec) { rec.id = rec.id || pretty(idNorm); state = { kind: 'ok', rec: rec }; }
       else state = { kind: 'none' };
     } catch (e) { state = { kind: 'error' }; }
     render();
