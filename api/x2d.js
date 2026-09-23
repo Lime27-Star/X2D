@@ -4,6 +4,15 @@
  *   GET  /api/x2d?r=verify&id=X2D-XXXX-XXXX-XXXX   public  : look up one certificate
  *   POST /api/x2d?r=enroll                         public  : enrollment form
  *   POST /api/x2d?r=admin                          private : admin dashboard (password + cookie session)
+ *                                                              also manages instructor accounts and can see/edit
+ *                                                              every instructor's students and schedule
+ *   POST /api/x2d?r=instructor                     private : instructor dashboard (username + password + cookie
+ *                                                              session, separate from admin) — an instructor can
+ *                                                              only see/edit their own students and their own schedule
+ *
+ * The first instructor account (username "muhammed.ali", password set in SEED_INSTRUCTOR below) is created
+ * automatically the first time any instructor-related data is read, if the instructors list is still empty.
+ * Change or remove SEED_INSTRUCTOR once you've set a real password for that account from the admin dashboard.
  *
  * Environment variables (Vercel -> Project -> Settings -> Environment Variables):
  *   ADMIN_PASSWORD         required   password for /admin
@@ -18,8 +27,13 @@ const crypto = require('crypto');
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no I, L, O, 0, 1
 const LEVELS = ['', 'Complete beginner', 'Comfortable with computers', 'IT or security experience'];
 const SESSION_SECONDS = 12 * 3600;
+const INSTR_SESSION_SECONDS = 12 * 3600;
 const CERTS = 'x2d:certs';   // hash: normalized ID -> JSON
 const APPS = 'x2d:apps';     // hash: application id -> JSON
+const INSTR = 'x2d:instructors'; // hash: username -> JSON {username,name,active,createdAt,pass:"salt:hash"}
+const STUDENTS = 'x2d:students'; // hash: id -> JSON {id,name,phone,email,level,cohort,instructor,status,payment,progress,notes,enrolledAt,updatedAt}
+const SESSIONS = 'x2d:sessions'; // hash: id -> JSON {id,instructor,title,level,cohort,datetime,duration,notes,status}
+const SEED_INSTRUCTOR = { username: 'muhammed.ali', name: 'Muhammed Ali', password: '12345678M!' };
 
 const env = (k) => process.env[k] || '';
 const siteUrl = () => (env('SITE_URL') || 'https://x-2d.vercel.app').replace(/\/+$/, '');
@@ -76,6 +90,22 @@ async function readBody(req) {
 const norm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const clean = (s, n) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 const isDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s + 'T00:00:00Z'));
+const normUser = (s) => String(s || '').toLowerCase().trim().replace(/[^a-z0-9_.]/g, '').slice(0, 30);
+
+/* ------------------------------------------------------------------ password hashing (scrypt, no deps) */
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return salt + ':' + hash;
+}
+function verifyPassword(password, stored) {
+  if (!stored || stored.indexOf(':') === -1) return false;
+  const parts = stored.split(':'); const salt = parts[0], hash = parts[1];
+  let test;
+  try { test = crypto.scryptSync(String(password == null ? '' : password), salt, 64).toString('hex'); } catch (e) { return false; }
+  const a = Buffer.from(test, 'hex'), b = Buffer.from(hash, 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 const isHttps = (req) => String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
 function newId() {
   let s = '';
@@ -103,10 +133,14 @@ function sign(payload) {
   const p = b64u(JSON.stringify(payload));
   return p + '.' + crypto.createHmac('sha256', sessionKey()).update(p).digest('base64url');
 }
-function readSession(req) {
-  const m = /(?:^|;\s*)x2d_admin=([^;]+)/.exec(req.headers.cookie || '');
-  if (!m) return null;
-  const parts = m[1].split('.');
+function readCookieValue(req, name) {
+  const re = new RegExp('(?:^|;\\s*)' + name + '=([^;]+)');
+  const m = re.exec(req.headers.cookie || '');
+  return m ? m[1] : null;
+}
+function verifyToken(token) {
+  if (!token) return null;
+  const parts = token.split('.');
   if (parts.length !== 2) return null;
   const good = crypto.createHmac('sha256', sessionKey()).update(parts[0]).digest('base64url');
   const a = Buffer.from(parts[1]), b = Buffer.from(good);
@@ -116,12 +150,155 @@ function readSession(req) {
     return d.exp > Date.now() / 1000 ? d : null;
   } catch (e) { return null; }
 }
+function readSession(req) { return verifyToken(readCookieValue(req, 'x2d_admin')); }
+function readInstrSession(req) { return verifyToken(readCookieValue(req, 'x2d_instr')); }
 const sessionCookie = (val, maxAge, req) =>
   `x2d_admin=${val}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=${maxAge}` + (isHttps(req) ? '; Secure' : '');
+const instrSessionCookie = (val, maxAge, req) =>
+  `x2d_instr=${val}; HttpOnly; SameSite=Strict; Path=/api; Max-Age=${maxAge}` + (isHttps(req) ? '; Secure' : '');
 function passwordOk(input) {
   const a = crypto.createHash('sha256').update(String(input == null ? '' : input)).digest();
   const b = crypto.createHash('sha256').update(env('ADMIN_PASSWORD')).digest();
   return crypto.timingSafeEqual(a, b);
+}
+
+/* ------------------------------------------------------------------ instructors, students, sessions (shared by admin + instructor routes) */
+let seedTried = false;
+async function ensureSeedInstructor() {
+  if (seedTried) return; seedTried = true;
+  try {
+    const n = await redis(['HLEN', INSTR]);
+    if (!n) {
+      const rec = { username: SEED_INSTRUCTOR.username, name: SEED_INSTRUCTOR.name, active: true, createdAt: new Date().toISOString(), pass: hashPassword(SEED_INSTRUCTOR.password) };
+      await redis(['HSETNX', INSTR, SEED_INSTRUCTOR.username, JSON.stringify(rec)]);
+    }
+  } catch (e) { /* store may not be configured yet; nothing to seed */ }
+}
+async function instrList() {
+  await ensureSeedInstructor();
+  const all = parseAll(await hgetall(INSTR)).map((r) => ({ username: r.username, name: r.name, active: r.active !== false, createdAt: r.createdAt }));
+  return all.sort((a, b) => a.name.localeCompare(b.name));
+}
+async function instrCreate(b) {
+  const username = normUser(b.username);
+  const name = clean(b.name, 80);
+  const password = String(b.password || '');
+  if (username.length < 3) return { error: 'username' };
+  if (name.length < 2) return { error: 'name' };
+  if (password.length < 8) return { error: 'password' };
+  const rec = { username, name, active: true, createdAt: new Date().toISOString(), pass: hashPassword(password) };
+  const added = await redis(['HSETNX', INSTR, username, JSON.stringify(rec)]);
+  if (Number(added) !== 1) return { error: 'username_taken' };
+  return { record: { username, name, active: true, createdAt: rec.createdAt } };
+}
+async function instrDelete(b) { await redis(['HDEL', INSTR, normUser(b.id || b.username)]); return { ok: true }; }
+async function instrResetPassword(b) {
+  const username = normUser(b.username); const password = String(b.password || '');
+  if (password.length < 8) return { error: 'password' };
+  const raw = await redis(['HGET', INSTR, username]);
+  if (!raw) return { error: 'not_found' };
+  const rec = JSON.parse(raw); rec.pass = hashPassword(password);
+  await redis(['HSET', INSTR, username, JSON.stringify(rec)]);
+  return { ok: true };
+}
+async function instrSetActive(b) {
+  const username = normUser(b.username);
+  const raw = await redis(['HGET', INSTR, username]);
+  if (!raw) return { error: 'not_found' };
+  const rec = JSON.parse(raw); rec.active = !!b.active;
+  await redis(['HSET', INSTR, username, JSON.stringify(rec)]);
+  return { ok: true };
+}
+
+const STUDENT_STATUS = ['active', 'paused', 'graduated', 'dropped'];
+const PAYMENT_STATUS = ['paid', 'pending', 'overdue'];
+function studentFromInput(b, base) {
+  const name = clean(b.name, 120);
+  if (name.length < 2) return { error: 'name' };
+  const email = clean(b.email, 160);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'email' };
+  const phone = clean(b.phone, 30);
+  const level = clean(b.level, 30) || (base && base.level) || 'Level 1';
+  const cohort = clean(b.cohort, 40);
+  const status = STUDENT_STATUS.indexOf(b.status) !== -1 ? b.status : ((base && base.status) || 'active');
+  const payment = PAYMENT_STATUS.indexOf(b.payment) !== -1 ? b.payment : ((base && base.payment) || 'pending');
+  const progress = clean(b.progress, 4000);
+  const notes = clean(b.notes, 4000);
+  return Object.assign({}, base, { name, phone, email, level, cohort, status, payment, progress, notes });
+}
+async function studentsList(scopeUser) {
+  const all = parseAll(await hgetall(STUDENTS));
+  const filtered = scopeUser ? all.filter((s) => s.instructor === scopeUser) : all;
+  return filtered.sort((x, y) => String(y.updatedAt || y.enrolledAt || '').localeCompare(String(x.updatedAt || x.enrolledAt || '')));
+}
+async function studentCreate(b, scopeUser) {
+  const instructor = scopeUser || normUser(b.instructor);
+  if (!instructor) return { error: 'instructor' };
+  if (!scopeUser) { const raw = await redis(['HGET', INSTR, instructor]); if (!raw) return { error: 'instructor_not_found' }; }
+  const rec0 = studentFromInput(b, {});
+  if (rec0.error) return rec0;
+  const id = crypto.randomBytes(8).toString('hex');
+  const now = new Date().toISOString();
+  const rec = Object.assign(rec0, { id, instructor, enrolledAt: now, updatedAt: now });
+  await redis(['HSET', STUDENTS, id, JSON.stringify(rec)]);
+  return { record: rec };
+}
+async function studentMutate(action, b, scopeUser) {
+  const id = clean(b.id, 40);
+  const raw = id ? await redis(['HGET', STUDENTS, id]) : null;
+  if (!raw) return { error: 'not_found' };
+  const rec = JSON.parse(raw);
+  if (scopeUser && rec.instructor !== scopeUser) return { error: 'forbidden' };
+  if (action === 'delete') { await redis(['HDEL', STUDENTS, id]); return { ok: true }; }
+  const merged = studentFromInput(b, rec);
+  if (merged.error) return merged;
+  if (!scopeUser && b.instructor) merged.instructor = normUser(b.instructor);
+  merged.updatedAt = new Date().toISOString();
+  await redis(['HSET', STUDENTS, id, JSON.stringify(merged)]);
+  return { record: merged };
+}
+
+const SESSION_STATUS = ['scheduled', 'done', 'cancelled'];
+function sessionFromInput(b, base) {
+  const title = clean(b.title, 160);
+  if (title.length < 2) return { error: 'title' };
+  const datetime = String(b.datetime || '');
+  if (!datetime || isNaN(new Date(datetime))) return { error: 'datetime' };
+  const level = clean(b.level, 30);
+  const cohort = clean(b.cohort, 40);
+  const duration = Math.max(15, Math.min(600, parseInt(b.duration, 10) || 120));
+  const notes = clean(b.notes, 2000);
+  const status = SESSION_STATUS.indexOf(b.status) !== -1 ? b.status : ((base && base.status) || 'scheduled');
+  return Object.assign({}, base, { title, datetime, level, cohort, duration, notes, status });
+}
+async function sessionsList(scopeUser) {
+  const all = parseAll(await hgetall(SESSIONS));
+  const filtered = scopeUser ? all.filter((s) => s.instructor === scopeUser) : all;
+  return filtered.sort((x, y) => String(x.datetime || '').localeCompare(String(y.datetime || '')));
+}
+async function sessionCreate(b, scopeUser) {
+  const instructor = scopeUser || normUser(b.instructor);
+  if (!instructor) return { error: 'instructor' };
+  if (!scopeUser) { const raw = await redis(['HGET', INSTR, instructor]); if (!raw) return { error: 'instructor_not_found' }; }
+  const rec0 = sessionFromInput(b, {});
+  if (rec0.error) return rec0;
+  const id = crypto.randomBytes(8).toString('hex');
+  const rec = Object.assign(rec0, { id, instructor, createdAt: new Date().toISOString() });
+  await redis(['HSET', SESSIONS, id, JSON.stringify(rec)]);
+  return { record: rec };
+}
+async function sessionMutate(action, b, scopeUser) {
+  const id = clean(b.id, 40);
+  const raw = id ? await redis(['HGET', SESSIONS, id]) : null;
+  if (!raw) return { error: 'not_found' };
+  const rec = JSON.parse(raw);
+  if (scopeUser && rec.instructor !== scopeUser) return { error: 'forbidden' };
+  if (action === 'delete') { await redis(['HDEL', SESSIONS, id]); return { ok: true }; }
+  const merged = sessionFromInput(b, rec);
+  if (merged.error) return merged;
+  if (!scopeUser && b.instructor) merged.instructor = normUser(b.instructor);
+  await redis(['HSET', SESSIONS, id, JSON.stringify(merged)]);
+  return { record: merged };
 }
 
 /* ------------------------------------------------------------------ public: verify a certificate */
@@ -254,6 +431,143 @@ async function admin(req, res) {
       case 'delete_app':
         await redis(['HDEL', APPS, clean(b.id, 40)]);
         return send(res, 200, { ok: true });
+
+      /* -------- instructors (admin manages accounts) -------- */
+      case 'instr_list':
+        return send(res, 200, { ok: true, instructors: await instrList() });
+      case 'instr_create': {
+        const r = await instrCreate(b);
+        if (r.error) return send(res, 400, { error: r.error });
+        return send(res, 200, { ok: true, instructor: r.record });
+      }
+      case 'instr_delete':
+        await instrDelete(b);
+        return send(res, 200, { ok: true });
+      case 'instr_reset_password': {
+        const r = await instrResetPassword(b);
+        if (r.error) return send(res, r.error === 'not_found' ? 404 : 400, { error: r.error });
+        return send(res, 200, { ok: true });
+      }
+      case 'instr_set_active': {
+        const r = await instrSetActive(b);
+        if (r.error) return send(res, 404, { error: r.error });
+        return send(res, 200, { ok: true });
+      }
+
+      /* -------- students (admin sees / manages every instructor's students) -------- */
+      case 'students_list':
+        return send(res, 200, { ok: true, students: await studentsList(null) });
+      case 'student_create': {
+        const r = await studentCreate(b, null);
+        if (r.error) return send(res, 400, { error: r.error });
+        return send(res, 200, { ok: true, record: r.record });
+      }
+      case 'student_update': {
+        const r = await studentMutate('update', b, null);
+        if (r.error) return send(res, r.error === 'not_found' ? 404 : 400, { error: r.error });
+        return send(res, 200, { ok: true, record: r.record });
+      }
+      case 'student_delete': {
+        const r = await studentMutate('delete', b, null);
+        if (r.error) return send(res, 404, { error: r.error });
+        return send(res, 200, { ok: true });
+      }
+
+      /* -------- schedule / sessions (admin sees / manages every instructor's sessions) -------- */
+      case 'sessions_list':
+        return send(res, 200, { ok: true, sessions: await sessionsList(null) });
+      case 'session_create': {
+        const r = await sessionCreate(b, null);
+        if (r.error) return send(res, 400, { error: r.error });
+        return send(res, 200, { ok: true, record: r.record });
+      }
+      case 'session_update': {
+        const r = await sessionMutate('update', b, null);
+        if (r.error) return send(res, r.error === 'not_found' ? 404 : 400, { error: r.error });
+        return send(res, 200, { ok: true, record: r.record });
+      }
+      case 'session_delete': {
+        const r = await sessionMutate('delete', b, null);
+        if (r.error) return send(res, 404, { error: r.error });
+        return send(res, 200, { ok: true });
+      }
+
+      default:
+        return send(res, 400, { error: 'unknown_action' });
+    }
+  } catch (e) {
+    if (e instanceof StoreError) return send(res, 503, { error: e.message });
+    throw e;
+  }
+}
+
+/* ------------------------------------------------------------------ private: instructor dashboard (own login, own students + schedule only) */
+async function instructorRoute(req, res) {
+  if (req.method !== 'POST') return send(res, 405, { error: 'method' });
+  if (req.headers['x-requested-with'] !== 'x2d') return send(res, 403, { error: 'forbidden' });
+  const b = await readBody(req);
+  if (!b || typeof b !== 'object') return send(res, 400, { error: 'bad_request' });
+  const action = String(b.action || '');
+
+  if (action === 'login') {
+    if (!(await allow('ilogin', req, 8, 900))) return send(res, 429, { error: 'too_many' });
+    await ensureSeedInstructor();
+    const username = normUser(b.username);
+    let rec = null;
+    try { const raw = username ? await redis(['HGET', INSTR, username]) : null; rec = raw ? JSON.parse(raw) : null; } catch (e) { return send(res, 503, { error: e.message }); }
+    const ok = rec && rec.active !== false && verifyPassword(b.password, rec.pass);
+    if (!ok) { await new Promise((r) => setTimeout(r, 600)); return send(res, 401, { error: 'wrong_credentials' }); }
+    const token = sign({ u: username, exp: Math.floor(Date.now() / 1000) + INSTR_SESSION_SECONDS });
+    return send(res, 200, { ok: true, name: rec.name }, { 'Set-Cookie': instrSessionCookie(token, INSTR_SESSION_SECONDS, req) });
+  }
+  if (action === 'logout') return send(res, 200, { ok: true }, { 'Set-Cookie': instrSessionCookie('', 0, req) });
+
+  const sess = readInstrSession(req);
+  if (!sess || !sess.u) return send(res, 401, { error: 'unauthorized' });
+  const username = sess.u;
+
+  try {
+    switch (action) {
+      case 'me': {
+        const raw = await redis(['HGET', INSTR, username]);
+        let rec = null; try { rec = raw ? JSON.parse(raw) : null; } catch (e) { rec = null; }
+        if (!rec || rec.active === false) return send(res, 401, { error: 'unauthorized' });
+        return send(res, 200, { ok: true, username, name: rec.name, siteUrl: siteUrl() });
+      }
+      case 'students_list':
+        return send(res, 200, { ok: true, students: await studentsList(username) });
+      case 'student_create': {
+        const r = await studentCreate(b, username);
+        if (r.error) return send(res, 400, { error: r.error });
+        return send(res, 200, { ok: true, record: r.record });
+      }
+      case 'student_update': {
+        const r = await studentMutate('update', b, username);
+        if (r.error) return send(res, r.error === 'forbidden' ? 403 : (r.error === 'not_found' ? 404 : 400), { error: r.error });
+        return send(res, 200, { ok: true, record: r.record });
+      }
+      case 'student_delete': {
+        const r = await studentMutate('delete', b, username);
+        if (r.error) return send(res, r.error === 'forbidden' ? 403 : 404, { error: r.error });
+        return send(res, 200, { ok: true });
+      }
+      case 'sessions_list':
+        return send(res, 200, { ok: true, sessions: await sessionsList(username) });
+      case 'session_create': {
+        const r = await sessionCreate(b, username);
+        if (r.error) return send(res, 400, { error: r.error });
+        return send(res, 200, { ok: true, record: r.record });
+      }
+      case 'session_update': {
+        const r = await sessionMutate('update', b, username);
+        if (r.error) return send(res, r.error === 'forbidden' ? 403 : (r.error === 'not_found' ? 404 : 400), { error: r.error });
+        return send(res, 200, { ok: true, record: r.record });
+      }
+      case 'session_delete': {
+        const r = await sessionMutate('delete', b, username);
+        if (r.error) return send(res, r.error === 'forbidden' ? 403 : 404, { error: r.error });
+        return send(res, 200, { ok: true });
+      }
       default:
         return send(res, 400, { error: 'unknown_action' });
     }
@@ -271,6 +585,7 @@ module.exports = async (req, res) => {
     if (route === 'verify' && req.method === 'GET') return await verify(req, res, url);
     if (route === 'enroll' && req.method === 'POST') return await enroll(req, res);
     if (route === 'admin') return await admin(req, res);
+    if (route === 'instructor') return await instructorRoute(req, res);
     return send(res, 404, { error: 'not_found' });
   } catch (e) {
     console.error(e);

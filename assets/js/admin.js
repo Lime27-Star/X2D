@@ -2312,7 +2312,7 @@ function h(tag, props) {
   return e;
 }
 
-var state = { siteUrl: 'https://x-2d.vercel.app', certs: [], apps: [], current: null, canvas: null, tab: 'certs' };
+var state = { siteUrl: 'https://x-2d.vercel.app', certs: [], apps: [], instructors: [], students: [], sessions: [], current: null, canvas: null, tab: 'certs' };
 
 var ERR = {
   store_not_configured: 'The database is not connected yet. In Vercel: open your project, go to Storage, connect an Upstash Redis database, then redeploy.',
@@ -2324,9 +2324,17 @@ var ERR = {
   name: 'Enter the student’s name (at least 2 characters).',
   date: 'Enter a valid completion date.',
   examDate: 'The exam date is not valid.',
-  not_found: 'That certificate no longer exists.',
+  not_found: 'That record no longer exists.',
   unauthorized: 'Your session ended. Sign in again.',
-  forbidden: 'The request was blocked. Reload the page and try again.'
+  forbidden: 'The request was blocked. Reload the page and try again.',
+  username: 'Choose a username of at least 3 characters (lowercase letters, numbers, dots or underscores).',
+  password: 'Choose a password of at least 8 characters.',
+  username_taken: 'That username is already in use.',
+  instructor: 'Choose an instructor.',
+  instructor_not_found: 'That instructor no longer exists.',
+  email: 'That email address doesn’t look right.',
+  title: 'Enter a session title.',
+  datetime: 'Enter a valid date and time.'
 };
 var msg = function (e) { return ERR[e && e.message] || 'Something went wrong (' + (e && e.message) + ').'; };
 
@@ -2561,10 +2569,162 @@ function renderApps() {
   });
 }
 
+/* ==================================================================
+   Instructors / Students / Schedule
+   ================================================================== */
+function fmtWhen(iso) {
+  var t = new Date(iso);
+  return isNaN(t) ? iso : t.toLocaleString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+function instrName(username) {
+  var i = state.instructors.filter(function (x) { return x.username === username; })[0];
+  return i ? i.name : (username || '—');
+}
+function fillInstructorSelects() {
+  [{ sel: '#s-instr', withAll: false }, { sel: '#sc-instr', withAll: false }, { sel: '#studFilter', withAll: true }, { sel: '#sessFilter', withAll: true }].forEach(function (o) {
+    var el = $(o.sel); if (!el) return;
+    var current = el.value;
+    el.textContent = '';
+    if (o.withAll) el.appendChild(h('option', { value: '' }, 'All instructors'));
+    state.instructors.forEach(function (i) { el.appendChild(h('option', { value: i.username, text: i.name + (i.active === false ? ' (inactive)' : '') })); });
+    if (current) el.value = current;
+  });
+}
+function renderInstructors() {
+  var body = $('#instrBody'); $('#nInstr').textContent = state.instructors.length; body.textContent = '';
+  if (!state.instructors.length) { body.appendChild(h('tr', null, h('td', { colspan: 5, class: 'empty', text: 'No instructor accounts yet.' }))); return; }
+  state.instructors.forEach(function (i) {
+    body.appendChild(h('tr', null,
+      h('td', { text: i.name }),
+      h('td', { class: 'mono', text: i.username }),
+      h('td', null, h('span', { class: 'pill ' + (i.active === false ? 'bad' : 'ok'), text: i.active === false ? 'Inactive' : 'Active' })),
+      h('td', { text: i.createdAt ? fmtWhen(i.createdAt) : '—' }),
+      h('td', { class: 'acts' },
+        h('button', { class: 'lnk', type: 'button', text: 'Reset password', onclick: function () { openResetPassword(i); } }),
+        h('button', { class: 'lnk', type: 'button', text: i.active === false ? 'Activate' : 'Deactivate', onclick: function () { toggleInstrActive(i); } }),
+        h('button', { class: 'lnk danger', type: 'button', text: 'Delete', onclick: function () { removeInstructor(i); } })
+      )));
+  });
+}
+function renderStudents() {
+  var body = $('#studBody');
+  var qEl = $('#studSearch'), fEl = $('#studFilter');
+  var q = (qEl && qEl.value || '').trim().toLowerCase(), fInstr = fEl ? fEl.value : '';
+  var rows = state.students.filter(function (s) {
+    if (fInstr && s.instructor !== fInstr) return false;
+    if (!q) return true;
+    return (s.name + ' ' + (s.phone || '') + ' ' + (s.email || '')).toLowerCase().indexOf(q) !== -1;
+  });
+  $('#nStudents').textContent = state.students.length; body.textContent = '';
+  if (!rows.length) { body.appendChild(h('tr', null, h('td', { colspan: 6, class: 'empty', text: state.students.length ? 'No student matches.' : 'No students yet. Use "Add student".' }))); return; }
+  rows.forEach(function (s) {
+    body.appendChild(h('tr', null,
+      h('td', null, h('b', { text: s.name }), h('div', { class: 'sub', text: [s.phone, s.email].filter(Boolean).join(' · ') })),
+      h('td', { text: instrName(s.instructor) }),
+      h('td', null, s.level || '—', s.cohort ? h('div', { class: 'sub', text: s.cohort }) : null),
+      h('td', null, h('span', { class: 'pill ' + (s.status === 'active' ? 'ok' : (s.status === 'dropped' ? 'bad' : '')), text: (s.status || 'active').replace(/^./, function (c) { return c.toUpperCase(); }) })),
+      h('td', null, h('span', { class: 'pill ' + (s.payment === 'paid' ? 'ok' : (s.payment === 'overdue' ? 'bad' : '')), text: (s.payment || 'pending').replace(/^./, function (c) { return c.toUpperCase(); }) })),
+      h('td', { class: 'acts' },
+        h('button', { class: 'lnk', type: 'button', text: 'Edit', onclick: function () { openStudentEdit(s); } }),
+        h('button', { class: 'lnk danger', type: 'button', text: 'Delete', onclick: function () { removeStudent(s); } })
+      )));
+  });
+}
+function renderSessions() {
+  var body = $('#sessBody');
+  var fEl = $('#sessFilter'), fInstr = fEl ? fEl.value : '';
+  var rows = state.sessions.filter(function (s) { return !fInstr || s.instructor === fInstr; });
+  $('#nSchedule').textContent = state.sessions.length; body.textContent = '';
+  if (!rows.length) { body.appendChild(h('tr', null, h('td', { colspan: 5, class: 'empty', text: state.sessions.length ? 'No session matches.' : 'No sessions yet. Use "Add session".' }))); return; }
+  rows.forEach(function (s) {
+    body.appendChild(h('tr', null,
+      h('td', { text: fmtWhen(s.datetime) }, h('div', { class: 'sub', text: s.duration + ' min' })),
+      h('td', null, h('b', { text: s.title }), s.notes ? h('div', { class: 'sub', text: s.notes }) : null),
+      h('td', { text: instrName(s.instructor) }),
+      h('td', null, s.level || '—', s.cohort ? h('div', { class: 'sub', text: s.cohort }) : null),
+      h('td', null, h('span', { class: 'pill ' + (s.status === 'done' ? 'ok' : (s.status === 'cancelled' ? 'bad' : '')), text: (s.status || 'scheduled').replace(/^./, function (c) { return c.toUpperCase(); }) })),
+      h('td', { class: 'acts' },
+        h('button', { class: 'lnk', type: 'button', text: 'Edit', onclick: function () { openSessionEdit(s); } }),
+        h('button', { class: 'lnk danger', type: 'button', text: 'Delete', onclick: function () { removeSession(s); } })
+      )));
+  });
+}
+
+async function loadTeamData() {
+  try { state.instructors = (await api('instr_list')).instructors; } catch (e) { if (e.status === 401) fail(e); }
+  fillInstructorSelects(); renderInstructors();
+  try { state.students = (await api('students_list')).students; } catch (e) { if (e.status === 401) fail(e); }
+  renderStudents();
+  try { state.sessions = (await api('sessions_list')).sessions; } catch (e) { if (e.status === 401) fail(e); }
+  renderSessions();
+}
+
+/* ---------- instructor actions ---------- */
+function openAddInstructor() {
+  var f = $('#instrForm'); f.reset(); $('#instrErr').textContent = ''; $('#instrDlg').showModal();
+}
+async function removeInstructor(i) {
+  if (!window.confirm('Delete the instructor account "' + i.name + '" (' + i.username + ')?\nTheir students and sessions are kept, just no longer linked to a working login.')) return;
+  try { await api('instr_delete', { username: i.username }); state.instructors = state.instructors.filter(function (x) { return x.username !== i.username; }); fillInstructorSelects(); renderInstructors(); toast('Instructor deleted.'); }
+  catch (e) { fail(e); }
+}
+async function toggleInstrActive(i) {
+  var active = i.active === false;
+  try { await api('instr_set_active', { username: i.username, active: active }); i.active = active; renderInstructors(); toast(active ? 'Instructor activated.' : 'Instructor deactivated.'); }
+  catch (e) { fail(e); }
+}
+var resettingInstr = null;
+function openResetPassword(i) {
+  resettingInstr = i; $('#pwForm').reset(); $('#pwErr').textContent = ''; $('#pwWho').textContent = i.name + ' (' + i.username + ')'; $('#pwDlg').showModal();
+}
+
+/* ---------- student actions ---------- */
+var editingStudent = null;
+function openAddStudent() {
+  editingStudent = null; var f = $('#studForm'); f.reset(); $('#studDlgTitle').textContent = 'Add student'; $('#studErr').textContent = '';
+  f.status.value = 'active'; f.payment.value = 'pending'; $('#studDlg').showModal();
+}
+function openStudentEdit(s) {
+  editingStudent = s; var f = $('#studForm');
+  f.name.value = s.name || ''; f.instructor.value = s.instructor || ''; f.phone.value = s.phone || ''; f.email.value = s.email || '';
+  f.level.value = s.level || 'Level 1'; f.cohort.value = s.cohort || ''; f.status.value = s.status || 'active'; f.payment.value = s.payment || 'pending';
+  f.progress.value = s.progress || ''; f.notes.value = s.notes || '';
+  $('#studDlgTitle').textContent = 'Edit student'; $('#studErr').textContent = ''; $('#studDlg').showModal();
+}
+async function removeStudent(s) {
+  if (!window.confirm('Delete ' + s.name + ' permanently?')) return;
+  try { await api('student_delete', { id: s.id }); state.students = state.students.filter(function (x) { return x.id !== s.id; }); renderStudents(); toast('Student deleted.'); }
+  catch (e) { fail(e); }
+}
+
+/* ---------- session actions ---------- */
+var editingSession = null;
+function openAddSession() {
+  editingSession = null; var f = $('#sessForm'); f.reset(); $('#sessDlgTitle').textContent = 'Add session'; $('#sessErr').textContent = '';
+  f.duration.value = 120; f.status.value = 'scheduled'; $('#sessDlg').showModal();
+}
+function toLocalInput(iso) {
+  var t = new Date(iso); if (isNaN(t)) return '';
+  var p = function (n) { return String(n).padStart(2, '0'); };
+  return t.getFullYear() + '-' + p(t.getMonth() + 1) + '-' + p(t.getDate()) + 'T' + p(t.getHours()) + ':' + p(t.getMinutes());
+}
+function openSessionEdit(s) {
+  editingSession = s; var f = $('#sessForm');
+  f.title.value = s.title || ''; f.instructor.value = s.instructor || ''; f.datetime.value = toLocalInput(s.datetime);
+  f.duration.value = s.duration || 120; f.level.value = s.level || ''; f.cohort.value = s.cohort || ''; f.status.value = s.status || 'scheduled'; f.notes.value = s.notes || '';
+  $('#sessDlgTitle').textContent = 'Edit session'; $('#sessErr').textContent = ''; $('#sessDlg').showModal();
+}
+async function removeSession(s) {
+  if (!window.confirm('Delete the session "' + s.title + '"?')) return;
+  try { await api('session_delete', { id: s.id }); state.sessions = state.sessions.filter(function (x) { return x.id !== s.id; }); renderSessions(); toast('Session deleted.'); }
+  catch (e) { fail(e); }
+}
+
 async function loadAll() {
   banner('');
   try { state.certs = (await api('list')).certs; renderCerts(); } catch (e) { renderCerts(); fail(e); }
   try { state.apps = (await api('apps')).apps; renderApps(); } catch (e) { renderApps(); if (e.status === 401) fail(e); }
+  await loadTeamData();
 }
 
 /* ---------- actions ---------- */
@@ -2614,7 +2774,9 @@ function showApp() { $('#login').hidden = true; $('#app').hidden = false; $('#si
 function setTab(t) {
   state.tab = t;
   $('#paneCerts').hidden = t !== 'certs'; $('#paneApps').hidden = t !== 'apps';
+  $('#paneInstr').hidden = t !== 'instr'; $('#paneStudents').hidden = t !== 'students'; $('#paneSchedule').hidden = t !== 'schedule';
   $('#tabCerts').setAttribute('aria-selected', t === 'certs'); $('#tabApps').setAttribute('aria-selected', t === 'apps');
+  $('#tabInstr').setAttribute('aria-selected', t === 'instr'); $('#tabStudents').setAttribute('aria-selected', t === 'students'); $('#tabSchedule').setAttribute('aria-selected', t === 'schedule');
 }
 
 async function boot() {
@@ -2628,9 +2790,62 @@ async function boot() {
   $('#signOut').addEventListener('click', async function () { try { await api('logout'); } catch (e) { /* ignore */ } showLogin(''); });
   $('#tabCerts').addEventListener('click', function () { setTab('certs'); });
   $('#tabApps').addEventListener('click', function () { setTab('apps'); });
+  $('#tabInstr').addEventListener('click', function () { setTab('instr'); });
+  $('#tabStudents').addEventListener('click', function () { setTab('students'); });
+  $('#tabSchedule').addEventListener('click', function () { setTab('schedule'); });
   $('#search').addEventListener('input', renderCerts);
   $('#refresh').addEventListener('click', function () { loadAll().then(function () { toast('Refreshed.'); }); });
   $('#refreshApps').addEventListener('click', function () { loadAll().then(function () { toast('Refreshed.'); }); });
+
+  /* instructors */
+  $('#addInstrBtn').addEventListener('click', openAddInstructor);
+  $('#instrCancel').addEventListener('click', function () { $('#instrDlg').close(); });
+  $('#instrForm').addEventListener('submit', async function (e) {
+    e.preventDefault(); var f = e.target;
+    try {
+      var r = await api('instr_create', { name: f.name.value, username: f.username.value, password: f.password.value });
+      state.instructors.push(r.instructor); state.instructors.sort(function (a, b) { return a.name.localeCompare(b.name); });
+      fillInstructorSelects(); renderInstructors(); $('#instrDlg').close(); toast('Instructor created.');
+    } catch (err) { $('#instrErr').textContent = msg(err); }
+  });
+  $('#pwCancel').addEventListener('click', function () { $('#pwDlg').close(); });
+  $('#pwForm').addEventListener('submit', async function (e) {
+    e.preventDefault(); var f = e.target;
+    try { await api('instr_reset_password', { username: resettingInstr.username, password: f.password.value }); $('#pwDlg').close(); toast('Password updated.'); }
+    catch (err) { $('#pwErr').textContent = msg(err); }
+  });
+
+  /* students */
+  $('#addStudBtn').addEventListener('click', openAddStudent);
+  $('#studCancel').addEventListener('click', function () { $('#studDlg').close(); });
+  $('#studSearch').addEventListener('input', renderStudents);
+  $('#studFilter').addEventListener('change', renderStudents);
+  $('#studForm').addEventListener('submit', async function (e) {
+    e.preventDefault(); var f = e.target;
+    var payload = { name: f.name.value, instructor: f.instructor.value, phone: f.phone.value, email: f.email.value, level: f.level.value, cohort: f.cohort.value, status: f.status.value, payment: f.payment.value, progress: f.progress.value, notes: f.notes.value };
+    try {
+      var r;
+      if (editingStudent) { payload.id = editingStudent.id; r = await api('student_update', payload); Object.assign(editingStudent, r.record); }
+      else { r = await api('student_create', payload); state.students.unshift(r.record); }
+      renderStudents(); $('#studDlg').close(); toast('Saved.');
+    } catch (err) { $('#studErr').textContent = msg(err); }
+  });
+
+  /* schedule */
+  $('#addSessBtn').addEventListener('click', openAddSession);
+  $('#sessCancel').addEventListener('click', function () { $('#sessDlg').close(); });
+  $('#sessFilter').addEventListener('change', renderSessions);
+  $('#sessForm').addEventListener('submit', async function (e) {
+    e.preventDefault(); var f = e.target;
+    var payload = { title: f.title.value, instructor: f.instructor.value, datetime: f.datetime.value, duration: f.duration.value, level: f.level.value, cohort: f.cohort.value, status: f.status.value, notes: f.notes.value };
+    try {
+      var r;
+      if (editingSession) { payload.id = editingSession.id; r = await api('session_update', payload); Object.assign(editingSession, r.record); }
+      else { r = await api('session_create', payload); state.sessions.push(r.record); }
+      state.sessions.sort(function (a, b) { return String(a.datetime).localeCompare(String(b.datetime)); });
+      renderSessions(); $('#sessDlg').close(); toast('Saved.');
+    } catch (err) { $('#sessErr').textContent = msg(err); }
+  });
 
   var f = $('#issueForm'); f.date.value = today();
   f.addEventListener('submit', async function (e) {

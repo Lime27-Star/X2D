@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/admin", "destination": "/admin.html" },
+    { "source": "/instructor", "destination": "/instructor.html" },
     { "source": "/verify", "destination": "/verify.html" }
   ],
   "headers": [
@@ -17,6 +18,8 @@
     { "source": "/assets/img/(.*)", "headers": [ { "key": "Cache-Control", "value": "public, max-age=604800" } ] },
     { "source": "/admin", "headers": [ { "key": "X-Robots-Tag", "value": "noindex, nofollow" } ] },
     { "source": "/admin.html", "headers": [ { "key": "X-Robots-Tag", "value": "noindex, nofollow" } ] },
+    { "source": "/instructor", "headers": [ { "key": "X-Robots-Tag", "value": "noindex, nofollow" } ] },
+    { "source": "/instructor.html", "headers": [ { "key": "X-Robots-Tag", "value": "noindex, nofollow" } ] },
     { "source": "/api/(.*)", "headers": [ { "key": "Cache-Control", "value": "no-store" }, { "key": "X-Robots-Tag", "value": "noindex" } ] }
   ]
 }

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html class="js no-intro is-ready" dir="ltr" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>X2D Instructor</title>
+<meta content="noindex, nofollow" name="robots"/>
+<meta content="#080C0E" name="theme-color"/>
+<link href="favicon.svg" rel="icon" type="image/svg+xml"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="assets/css/styles.css" rel="stylesheet"/>
+</head>
+<body class="adm">
+<header class="adm-bar"><div class="adm-wrap adm-bar-in">
+<a aria-label="X2D — website" class="logo" href="./">X2D</a><span class="adm-tag">Instructor</span><span class="adm-sp"></span>
+<span class="sub" id="whoami"></span>
+<button class="lnk" hidden id="signOut" type="button">Sign out</button>
+</div></header>
+
+<main class="adm-wrap">
+<section hidden id="login">
+<h1>Instructor sign in</h1>
+<p>Your own students and schedule — nobody else's.</p>
+<form id="loginForm">
+<div class="field"><label for="u">Username</label><input autocomplete="username" id="u" required type="text"/></div>
+<div class="field"><label for="pw">Password</label><input autocomplete="current-password" id="pw" required type="password"/></div>
+<button class="btn btn-red" id="loginBtn" type="submit"><span>Sign in</span></button>
+<p class="err" id="loginErr" role="alert"></p>
+</form>
+</section>
+
+<section hidden id="app">
+<p class="banner" hidden id="banner" role="alert"></p>
+<div class="tabs" role="tablist">
+<button aria-selected="true" id="tabStudents" role="tab" type="button">My students<span class="n" id="nStudents"></span></button>
+<button aria-selected="false" id="tabSchedule" role="tab" type="button">My schedule<span class="n" id="nSchedule"></span></button>
+</div>
+
+<div id="paneStudents">
+<div class="adm-grid" style="grid-template-columns:1fr">
+<div>
+<div class="tbl-head"><h2>Students</h2><input aria-label="Search students" id="studSearch" placeholder="Search name / phone / email" type="search"/><span class="sp" style="flex:1"></span><button class="btn btn-red sm" id="addStudBtn" type="button"><span>Add student</span></button></div>
+<div class="tbl-wrap"><table class="t"><thead><tr><th>Student</th><th>Level / cohort</th><th>Status</th><th>Payment</th><th>Progress</th><th></th></tr></thead><tbody id="studBody"></tbody></table></div>
+</div>
+</div>
+</div>
+
+<div hidden id="paneSchedule">
+<div class="adm-grid" style="grid-template-columns:1fr">
+<div>
+<div class="tbl-head"><h2>Schedule</h2><span class="sp" style="flex:1"></span><button class="btn btn-red sm" id="addSessBtn" type="button"><span>Add session</span></button></div>
+<div class="tbl-wrap"><table class="t"><thead><tr><th>When</th><th>Session</th><th>Level / cohort</th><th>Status</th><th></th></tr></thead><tbody id="sessBody"></tbody></table></div>
+</div>
+</div>
+</div>
+</section>
+</main>
+
+<dialog id="studDlg">
+<form id="studForm">
+<h2 id="studDlgTitle">Add student</h2>
+<div class="field"><label for="s-name">Student name</label><input id="s-name" maxlength="120" name="name" required type="text"/></div>
+<div class="field"><label for="s-phone">Phone / WhatsApp</label><input id="s-phone" maxlength="30" name="phone" type="text"/></div>
+<div class="field"><label for="s-email">Email <span class="opt">optional</span></label><input id="s-email" maxlength="160" name="email" type="email"/></div>
+<div class="field"><label for="s-level">Level</label><select id="s-level" name="level"><option>Level 1</option><option>Level 2</option><option>Level 3</option><option>Portfolio Phase</option></select></div>
+<div class="field"><label for="s-cohort">Cohort <span class="opt">optional</span></label><input id="s-cohort" maxlength="40" name="cohort" placeholder="e.g. Cohort 1" type="text"/></div>
+<div class="field"><label for="s-status">Status</label><select id="s-status" name="status"><option value="active">Active</option><option value="paused">Paused</option><option value="graduated">Graduated</option><option value="dropped">Dropped</option></select></div>
+<div class="field"><label for="s-payment">Payment</label><select id="s-payment" name="payment"><option value="paid">Paid</option><option value="pending">Pending</option><option value="overdue">Overdue</option></select></div>
+<div class="field"><label for="s-progress">Progress <span class="opt">what they've completed, where they're stuck</span></label><textarea id="s-progress" name="progress" rows="4"></textarea></div>
+<div class="field"><label for="s-notes">Private notes <span class="opt">optional</span></label><textarea id="s-notes" name="notes" rows="3"></textarea></div>
+<p class="err" id="studErr" role="alert"></p>
+<div class="row"><button class="btn btn-red sm" type="submit"><span>Save</span></button><button class="btn btn-line sm" id="studCancel" type="button"><span>Cancel</span></button></div>
+</form>
+</dialog>
+
+<dialog id="sessDlg">
+<form id="sessForm">
+<h2 id="sessDlgTitle">Add session</h2>
+<div class="field"><label for="sc-title">Title</label><input id="sc-title" maxlength="160" name="title" placeholder="e.g. L2 · Week 2 · Subnetting" required type="text"/></div>
+<div class="field"><label for="sc-when">Date &amp; time</label><input id="sc-when" name="datetime" required type="datetime-local"/></div>
+<div class="field"><label for="sc-dur">Duration (minutes)</label><input id="sc-dur" min="15" max="600" name="duration" type="number" value="120"/></div>
+<div class="field"><label for="sc-level">Level <span class="opt">optional</span></label><select id="sc-level" name="level"><option value=""></option><option>Level 1</option><option>Level 2</option><option>Level 3</option><option>Portfolio Phase</option></select></div>
+<div class="field"><label for="sc-cohort">Cohort <span class="opt">optional</span></label><input id="sc-cohort" maxlength="40" name="cohort" type="text"/></div>
+<div class="field"><label for="sc-status">Status</label><select id="sc-status" name="status"><option value="scheduled">Scheduled</option><option value="done">Done</option><option value="cancelled">Cancelled</option></select></div>
+<div class="field"><label for="sc-notes">Notes <span class="opt">optional</span></label><textarea id="sc-notes" name="notes" rows="3"></textarea></div>
+<p class="err" id="sessErr" role="alert"></p>
+<div class="row"><button class="btn btn-red sm" type="submit"><span>Save</span></button><button class="btn btn-line sm" id="sessCancel" type="button"><span>Cancel</span></button></div>
+</form>
+</dialog>
+
+<div id="toast" role="status"></div>
+<script src="assets/js/instructor.js"></script>
+</body>
+</html>

@@ -109,6 +109,9 @@ dialog .row{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:1.4rem}
 <div class="tabs" role="tablist">
 <button aria-selected="true" id="tabCerts" role="tab" type="button">Certificates<span class="n" id="nCerts"></span></button>
 <button aria-selected="false" id="tabApps" role="tab" type="button">Applications<span class="n" id="nApps"></span></button>
+<button aria-selected="false" id="tabInstr" role="tab" type="button">Instructors<span class="n" id="nInstr"></span></button>
+<button aria-selected="false" id="tabStudents" role="tab" type="button">Students<span class="n" id="nStudents"></span></button>
+<button aria-selected="false" id="tabSchedule" role="tab" type="button">Schedule<span class="n" id="nSchedule"></span></button>
 </div>
 
 <div id="paneCerts">
@@ -153,6 +156,45 @@ dialog .row{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:1.4rem}
 </div>
 </div>
 </div>
+
+<div hidden id="paneInstr">
+<div class="adm-grid" style="grid-template-columns:1fr">
+<div>
+<div class="tbl-head"><h2>Instructor accounts</h2><span class="sp" style="flex:1"></span><button class="btn btn-red sm" id="addInstrBtn" type="button"><span>Add instructor</span></button></div>
+<p class="sub">Admins create instructor logins here. Each instructor signs in separately at <a href="instructor.html" target="_blank" rel="noopener">/instructor</a> and only ever sees their own students and schedule.</p>
+<div class="tbl-wrap"><table class="t"><thead><tr><th>Name</th><th>Username</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody id="instrBody"></tbody></table></div>
+</div>
+</div>
+</div>
+
+<div hidden id="paneStudents">
+<div class="adm-grid" style="grid-template-columns:1fr">
+<div>
+<div class="tbl-head">
+<h2>All students</h2>
+<select aria-label="Filter by instructor" id="studFilter"><option value="">All instructors</option></select>
+<input aria-label="Search students" id="studSearch" placeholder="Search name / phone / email" type="search"/>
+<span class="sp" style="flex:1"></span>
+<button class="btn btn-red sm" id="addStudBtn" type="button"><span>Add student</span></button>
+</div>
+<div class="tbl-wrap"><table class="t"><thead><tr><th>Student</th><th>Instructor</th><th>Level / cohort</th><th>Status</th><th>Payment</th><th></th></tr></thead><tbody id="studBody"></tbody></table></div>
+</div>
+</div>
+</div>
+
+<div hidden id="paneSchedule">
+<div class="adm-grid" style="grid-template-columns:1fr">
+<div>
+<div class="tbl-head">
+<h2>Full schedule</h2>
+<select aria-label="Filter by instructor" id="sessFilter"><option value="">All instructors</option></select>
+<span class="sp" style="flex:1"></span>
+<button class="btn btn-red sm" id="addSessBtn" type="button"><span>Add session</span></button>
+</div>
+<div class="tbl-wrap"><table class="t"><thead><tr><th>When</th><th>Session</th><th>Instructor</th><th>Level / cohort</th><th>Status</th><th></th></tr></thead><tbody id="sessBody"></tbody></table></div>
+</div>
+</div>
+</div>
 </section>
 </main>
 
@@ -168,6 +210,62 @@ dialog .row{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:1.4rem}
 <div class="row"><button class="btn btn-red sm" type="submit"><span>Save</span></button><button class="btn btn-line sm" id="editCancel" type="button"><span>Cancel</span></button></div>
 </form>
 </dialog>
+
+<dialog id="instrDlg">
+<form id="instrForm">
+<h2>Add instructor</h2>
+<div class="field"><label for="in-name">Full name</label><input id="in-name" maxlength="80" name="name" required type="text"/></div>
+<div class="field"><label for="in-user">Username</label><input autocomplete="off" id="in-user" maxlength="30" name="username" pattern="[a-z0-9_.]{3,30}" placeholder="e.g. muhammed.ali" required type="text"/><p class="hint">Lowercase letters, numbers, dots or underscores only.</p></div>
+<div class="field"><label for="in-pass">Password</label><input autocomplete="new-password" id="in-pass" minlength="8" name="password" required type="text"/><p class="hint">At least 8 characters. The instructor can sign in at /instructor.html.</p></div>
+<p class="err" id="instrErr" role="alert"></p>
+<div class="row"><button class="btn btn-red sm" type="submit"><span>Create instructor</span></button><button class="btn btn-line sm" id="instrCancel" type="button"><span>Cancel</span></button></div>
+</form>
+</dialog>
+
+<dialog id="pwDlg">
+<form id="pwForm">
+<h2>Reset password</h2>
+<p class="sub mono" id="pwWho"></p>
+<div class="field"><label for="pw-new">New password</label><input autocomplete="new-password" id="pw-new" minlength="8" name="password" required type="text"/></div>
+<p class="err" id="pwErr" role="alert"></p>
+<div class="row"><button class="btn btn-red sm" type="submit"><span>Set password</span></button><button class="btn btn-line sm" id="pwCancel" type="button"><span>Cancel</span></button></div>
+</form>
+</dialog>
+
+<dialog id="studDlg">
+<form id="studForm">
+<h2 id="studDlgTitle">Add student</h2>
+<div class="field"><label for="s-name">Student name</label><input id="s-name" maxlength="120" name="name" required type="text"/></div>
+<div class="field"><label for="s-instr">Instructor</label><select id="s-instr" name="instructor" required></select></div>
+<div class="field"><label for="s-phone">Phone / WhatsApp</label><input id="s-phone" maxlength="30" name="phone" type="text"/></div>
+<div class="field"><label for="s-email">Email <span class="opt">optional</span></label><input id="s-email" maxlength="160" name="email" type="email"/></div>
+<div class="field"><label for="s-level">Level</label><select id="s-level" name="level"><option>Level 1</option><option>Level 2</option><option>Level 3</option><option>Portfolio Phase</option></select></div>
+<div class="field"><label for="s-cohort">Cohort <span class="opt">optional</span></label><input id="s-cohort" maxlength="40" name="cohort" placeholder="e.g. Cohort 1" type="text"/></div>
+<div class="field"><label for="s-status">Status</label><select id="s-status" name="status"><option value="active">Active</option><option value="paused">Paused</option><option value="graduated">Graduated</option><option value="dropped">Dropped</option></select></div>
+<div class="field"><label for="s-payment">Payment</label><select id="s-payment" name="payment"><option value="paid">Paid</option><option value="pending">Pending</option><option value="overdue">Overdue</option></select></div>
+<div class="field"><label for="s-progress">Progress <span class="opt">optional</span></label><textarea id="s-progress" name="progress" rows="3"></textarea></div>
+<div class="field"><label for="s-notes">Notes <span class="opt">optional</span></label><textarea id="s-notes" name="notes" rows="3"></textarea></div>
+<p class="err" id="studErr" role="alert"></p>
+<div class="row"><button class="btn btn-red sm" type="submit"><span>Save</span></button><button class="btn btn-line sm" id="studCancel" type="button"><span>Cancel</span></button></div>
+</form>
+</dialog>
+
+<dialog id="sessDlg">
+<form id="sessForm">
+<h2 id="sessDlgTitle">Add session</h2>
+<div class="field"><label for="sc-title">Title</label><input id="sc-title" maxlength="160" name="title" placeholder="e.g. L2 · Week 2 · Subnetting" required type="text"/></div>
+<div class="field"><label for="sc-instr">Instructor</label><select id="sc-instr" name="instructor" required></select></div>
+<div class="field"><label for="sc-when">Date &amp; time</label><input id="sc-when" name="datetime" required type="datetime-local"/></div>
+<div class="field"><label for="sc-dur">Duration (minutes)</label><input id="sc-dur" min="15" max="600" name="duration" type="number" value="120"/></div>
+<div class="field"><label for="sc-level">Level <span class="opt">optional</span></label><select id="sc-level" name="level"><option value=""></option><option>Level 1</option><option>Level 2</option><option>Level 3</option><option>Portfolio Phase</option></select></div>
+<div class="field"><label for="sc-cohort">Cohort <span class="opt">optional</span></label><input id="sc-cohort" maxlength="40" name="cohort" type="text"/></div>
+<div class="field"><label for="sc-status">Status</label><select id="sc-status" name="status"><option value="scheduled">Scheduled</option><option value="done">Done</option><option value="cancelled">Cancelled</option></select></div>
+<div class="field"><label for="sc-notes">Notes <span class="opt">optional</span></label><textarea id="sc-notes" name="notes" rows="3"></textarea></div>
+<p class="err" id="sessErr" role="alert"></p>
+<div class="row"><button class="btn btn-red sm" type="submit"><span>Save</span></button><button class="btn btn-line sm" id="sessCancel" type="button"><span>Cancel</span></button></div>
+</form>
+</dialog>
+
 <div id="toast" role="status"></div>
 <script src="assets/js/admin.js"></script>
 </body>
