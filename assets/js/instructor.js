@@ -73,6 +73,12 @@ function toLocalInput(iso) {
 }
 function cap(s) { return (s || '').replace(/^./, function (c) { return c.toUpperCase(); }); }
 
+/* Never access form controls as f.name / f.title / f.method, etc.
+   Those names can collide with native HTMLFormElement/HTMLElement properties. */
+function field(form, id) { return document.getElementById(id); }
+function value(form, id) { return field(form, id).value; }
+function setValue(form, id, v) { field(form, id).value = v == null ? '' : v; }
+
 /* ---------- students ---------- */
 function renderStudents() {
   var body = $('#studBody');
@@ -99,13 +105,13 @@ function renderStudents() {
 var editingStudent = null;
 function openAddStudent() {
   editingStudent = null; var f = $('#studForm'); f.reset(); $('#studDlgTitle').textContent = 'Add student'; $('#studErr').textContent = '';
-  f.status.value = 'active'; f.payment.value = 'pending'; $('#studDlg').showModal();
+  setValue(f, 's-status', 'active'); setValue(f, 's-payment', 'pending'); $('#studDlg').showModal();
 }
 function openStudentEdit(s) {
   editingStudent = s; var f = $('#studForm');
-  f.name.value = s.name || ''; f.phone.value = s.phone || ''; f.email.value = s.email || '';
-  f.level.value = s.level || 'Level 1'; f.cohort.value = s.cohort || ''; f.status.value = s.status || 'active'; f.payment.value = s.payment || 'pending';
-  f.progress.value = s.progress || ''; f.notes.value = s.notes || '';
+  setValue(f, 's-name', s.name); setValue(f, 's-phone', s.phone); setValue(f, 's-email', s.email);
+  setValue(f, 's-level', s.level || 'Level 1'); setValue(f, 's-cohort', s.cohort); setValue(f, 's-status', s.status || 'active'); setValue(f, 's-payment', s.payment || 'pending');
+  setValue(f, 's-progress', s.progress); setValue(f, 's-notes', s.notes);
   $('#studDlgTitle').textContent = 'Edit student'; $('#studErr').textContent = ''; $('#studDlg').showModal();
 }
 async function removeStudent(s) {
@@ -117,7 +123,7 @@ async function removeStudent(s) {
 /* ---------- sessions ---------- */
 function renderSessions() {
   var body = $('#sessBody'); $('#nSchedule').textContent = state.sessions.length; body.textContent = '';
-  if (!state.sessions.length) { body.appendChild(h('tr', null, h('td', { colspan: 4, class: 'empty', text: 'No sessions yet. Use "Add session".' }))); return; }
+  if (!state.sessions.length) { body.appendChild(h('tr', null, h('td', { colspan: 5, class: 'empty', text: 'No sessions yet. Use "Add session".' }))); return; }
   state.sessions.forEach(function (s) {
     body.appendChild(h('tr', null,
       h('td', null, fmtWhen(s.datetime), h('div', { class: 'sub', text: s.duration + ' min' })),
@@ -133,12 +139,12 @@ function renderSessions() {
 var editingSession = null;
 function openAddSession() {
   editingSession = null; var f = $('#sessForm'); f.reset(); $('#sessDlgTitle').textContent = 'Add session'; $('#sessErr').textContent = '';
-  f.duration.value = 120; f.status.value = 'scheduled'; $('#sessDlg').showModal();
+  setValue(f, 'sc-dur', 120); setValue(f, 'sc-status', 'scheduled'); $('#sessDlg').showModal();
 }
 function openSessionEdit(s) {
   editingSession = s; var f = $('#sessForm');
-  f.title.value = s.title || ''; f.datetime.value = toLocalInput(s.datetime); f.duration.value = s.duration || 120;
-  f.level.value = s.level || ''; f.cohort.value = s.cohort || ''; f.status.value = s.status || 'scheduled'; f.notes.value = s.notes || '';
+  setValue(f, 'sc-title', s.title); setValue(f, 'sc-when', toLocalInput(s.datetime)); setValue(f, 'sc-dur', s.duration || 120);
+  setValue(f, 'sc-level', s.level); setValue(f, 'sc-cohort', s.cohort); setValue(f, 'sc-status', s.status || 'scheduled'); setValue(f, 'sc-notes', s.notes);
   $('#sessDlgTitle').textContent = 'Edit session'; $('#sessErr').textContent = ''; $('#sessDlg').showModal();
 }
 async function removeSession(s) {
@@ -183,7 +189,11 @@ async function boot() {
   $('#studSearch').addEventListener('input', renderStudents);
   $('#studForm').addEventListener('submit', async function (e) {
     e.preventDefault(); var f = e.target;
-    var payload = { name: f.name.value, phone: f.phone.value, email: f.email.value, level: f.level.value, cohort: f.cohort.value, status: f.status.value, payment: f.payment.value, progress: f.progress.value, notes: f.notes.value };
+    var payload = {
+      name: value(f, 's-name'), phone: value(f, 's-phone'), email: value(f, 's-email'),
+      level: value(f, 's-level'), cohort: value(f, 's-cohort'), status: value(f, 's-status'),
+      payment: value(f, 's-payment'), progress: value(f, 's-progress'), notes: value(f, 's-notes')
+    };
     try {
       var r;
       if (editingStudent) { payload.id = editingStudent.id; r = await api('student_update', payload); Object.assign(editingStudent, r.record); }
@@ -197,7 +207,11 @@ async function boot() {
   $('#sessCancel').addEventListener('click', function () { $('#sessDlg').close(); });
   $('#sessForm').addEventListener('submit', async function (e) {
     e.preventDefault(); var f = e.target;
-    var payload = { title: f.title.value, datetime: f.datetime.value, duration: f.duration.value, level: f.level.value, cohort: f.cohort.value, status: f.status.value, notes: f.notes.value };
+    var payload = {
+      title: value(f, 'sc-title'), datetime: value(f, 'sc-when'), duration: value(f, 'sc-dur'),
+      level: value(f, 'sc-level'), cohort: value(f, 'sc-cohort'), status: value(f, 'sc-status'),
+      notes: value(f, 'sc-notes')
+    };
     try {
       var r;
       if (editingSession) { payload.id = editingSession.id; r = await api('session_update', payload); Object.assign(editingSession, r.record); }
